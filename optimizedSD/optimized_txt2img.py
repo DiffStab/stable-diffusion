@@ -1,6 +1,8 @@
 import argparse, os, re
 import torch
 import numpy as np
+from pathlib import Path
+from pathvalidate import sanitize_filename, sanitize_filepath 
 from random import randint
 from omegaconf import OmegaConf
 from PIL import Image
@@ -39,7 +41,7 @@ ckpt = "models/ldm/stable-diffusion-v1/model.ckpt"
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
-    "--prompt", type=str, nargs="?", default="a painting of a virus monster playing guitar", help="the prompt to render"
+    "--prompt", type=str, nargs="?", default="a beathtakingly celestial group of black stars absorbing guitar playing viruses", help="the prompt to render"
 )
 parser.add_argument("--outdir", type=str, nargs="?", help="dir to write results to", default="outputs/txt2img-samples")
 parser.add_argument(
@@ -170,8 +172,15 @@ parser.add_argument(
 opt = parser.parse_args()
 
 tic = time.time()
-os.makedirs(opt.outdir, exist_ok=True)
-outpath = opt.outdir
+
+currentDir = Path.cwd()
+outpath = sanitize_filepath(opt.outdir)
+test_path = (currentDir / outpath).resolve()
+if test_path.parent != Path(currentDir).resolve():
+    raise Exception(f"Output path {outpath} is not in {currentDir} directory")
+    
+os.makedirs(outpath, exist_ok=True)
+
 grid_count = len(os.listdir(outpath)) - 1
 
 if opt.seed == None:
@@ -254,7 +263,7 @@ with torch.no_grad():
     for n in trange(opt.n_iter, desc="Sampling"):
         for prompts in tqdm(data, desc="data"):
 
-            sample_path = os.path.join(outpath, "_".join(re.split(":| ", prompts[0])))[:150]
+            sample_path = sanitize_filepath(os.path.join(outpath, "_".join(re.split(":| ", prompts[0])))[:150])
             os.makedirs(sample_path, exist_ok=True)
             base_count = len(os.listdir(sample_path))
 
@@ -309,8 +318,9 @@ with torch.no_grad():
                     x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
                     x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                     x_sample = 255.0 * rearrange(x_sample[0].cpu().numpy(), "c h w -> h w c")
+                    image_filename = sanitize_filename("seed_" + str(opt.seed) + "_" + f"{base_count:05}.{opt.format}")
                     Image.fromarray(x_sample.astype(np.uint8)).save(
-                        os.path.join(sample_path, "seed_" + str(opt.seed) + "_" + f"{base_count:05}.{opt.format}")
+                        (Path(sample_path) / image_filename).resolve()
                     )
                     seeds += str(opt.seed) + ","
                     opt.seed += 1
@@ -325,7 +335,6 @@ with torch.no_grad():
                 print("memory_final = ", torch.cuda.memory_allocated() / 1e6)
 
 toc = time.time()
-
 time_taken = (toc - tic) / 60.0
 
 print(

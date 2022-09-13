@@ -1,28 +1,26 @@
+import os, re
 import gradio as gr
 import numpy as np
+import pandas as pd
 import torch
+import time
 from torchvision.utils import make_grid
 from einops import rearrange
-import os, re
 from PIL import Image
-import torch
-import pandas as pd
-import numpy as np
 from random import randint
 from omegaconf import OmegaConf
-from PIL import Image
 from tqdm import tqdm, trange
 from itertools import islice
 from einops import rearrange
-from torchvision.utils import make_grid
-import time
+from pathlib import Path
+from pathvalidate import sanitize_filename, sanitize_filepath 
 from pytorch_lightning import seed_everything
-from torch import autocast
 from contextlib import nullcontext
 from ldm.util import instantiate_from_config
 from optimUtils import split_weighted_subprompts, logger
 from transformers import logging
 logging.set_verbosity_error()
+
 import mimetypes
 mimetypes.init()
 mimetypes.add_type("application/javascript", ".js")
@@ -117,9 +115,16 @@ def generate(
         modelCS.half()
 
     tic = time.time()
-    os.makedirs(outdir, exist_ok=True)
-    outpath = outdir
-    sample_path = os.path.join(outpath, "_".join(re.split(":| ", prompt)))[:150]
+
+    currentDir = Path.cwd()
+    outpath = sanitize_filepath(outdir)
+    test_path = (currentDir / outpath).resolve()
+    if test_path.parent != Path(currentDir).resolve():
+        raise Exception(f"Output path {outpath} is not in {currentDir} directory")
+    
+    os.makedirs(outpath, exist_ok=True)
+
+    sample_path = sanitize_filepath(os.path.join(outpath, "_".join(re.split(":| ", prompt)))[:150])
     os.makedirs(sample_path, exist_ok=True)
     base_count = len(os.listdir(sample_path))
     
@@ -189,8 +194,9 @@ def generate(
                         x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                         all_samples.append(x_sample.to("cpu"))
                         x_sample = 255.0 * rearrange(x_sample[0].cpu().numpy(), "c h w -> h w c")
+                        image_filename = sanitize_filename("seed_" + str(seed) + "_" + f"{base_count:05}.{img_format}")
                         Image.fromarray(x_sample.astype(np.uint8)).save(
-                            os.path.join(sample_path, "seed_" + str(seed) + "_" + f"{base_count:05}.{img_format}")
+                            (Path(sample_path) / image_filename).resolve()
                         )
                         seeds += str(seed) + ","
                         seed += 1
